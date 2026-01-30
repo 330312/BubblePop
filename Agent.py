@@ -108,7 +108,7 @@ class ReActTrinityAnalyzer:
     def run(self, raw_text: str):
         data0 = self.execute_react_step("0", raw_text)
         if isinstance(data0, dict) and data0.get("code") == 500:
-            return json.dumps(data0, ensure_ascii = False)
+            return json.dumps(data0, ensure_ascii = False) #这里需要在返回Error之后重新调用一遍整个函数，获得正确的json
         data_a = self.execute_react_step("A", raw_text)
         if isinstance(data_a, dict) and data_a.get("code") == 500:
             return json.dumps(data_a, ensure_ascii = False)
