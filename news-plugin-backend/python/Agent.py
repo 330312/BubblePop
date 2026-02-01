@@ -65,6 +65,35 @@ class ReActTrinityAnalyzer:
     def __init__(self, api_key: str):
         self.client = ZhipuAI(api_key=api_key)
         self.model = "glm-4-flash"
+
+    def _max_chars_for_step(self, agent_key: str) -> int:
+        """Return max input chars for a given ReAct step.
+
+        Env vars (all optional):
+        - AGENT_MAX_CHARS_DEFAULT (default: 5000)
+        - AGENT_MAX_CHARS_STANCES (for step B)
+        - AGENT_MAX_CHARS_RELATED_EVENTS (for step C)
+        """
+
+        def _to_int(v: str, fallback: int) -> int:
+            try:
+                n = int(v)
+                return n if n > 0 else fallback
+            except Exception:
+                return fallback
+
+        default_max = _to_int(os.getenv("AGENT_MAX_CHARS_DEFAULT", "5000"), 5000)
+
+        if agent_key == "B":
+            return _to_int(os.getenv("AGENT_MAX_CHARS_STANCES", str(default_max)), default_max)
+
+        if agent_key == "C":
+            return _to_int(
+                os.getenv("AGENT_MAX_CHARS_RELATED_EVENTS", str(default_max)),
+                default_max
+            )
+
+        return default_max
     def extract_json(self, text: str) -> dict:
         try:
             match = re.search(r'(\{.*\})', text, re.DOTALL)
@@ -90,12 +119,14 @@ class ReActTrinityAnalyzer:
             task_goal = config["goal"],
             format_instruction = config["format"]
         )
+
+        max_chars = self._max_chars_for_step(agent_key)
         
         response = self.client.chat.completions.create(
             model = self.model,
             messages = [
                 {"role": "system", "content": system_msg},
-                {"role": "user", "content": f"需要分析的内容如下：\n{content[:5000]}"}
+                {"role": "user", "content": f"需要分析的内容如下：\n{content[:max_chars]}"}
             ],
             temperature = 0.2
         )
@@ -118,14 +149,20 @@ class ReActTrinityAnalyzer:
         data_c = self.execute_react_step("C", raw_text)
         if isinstance(data_c, dict) and data_c.get("code") == 500:
             return json.dumps(data_c, ensure_ascii = False)
+
+        # Be tolerant to key naming differences in model output.
+        # Some models may output keys that match API field names (stances/relatedEvents)
+        # instead of the instructed keys (stakeholders/associations).
+        stances = data_b.get("stakeholders") or data_b.get("stances") or []
+        related_events = data_c.get("associations") or data_c.get("relatedEvents") or []
         
         final_output = {
             "code": 200,
             "data": {
                 "summary": data0.get("summary", ""),
                 "timeline": data_a.get("timeline", []),
-                "stances": data_b.get("stakeholders", []),
-                "relatedEvents": data_c.get("associations", [])
+                "stances": stances,
+                "relatedEvents": related_events
             }
         }
         return json.dumps(final_output, ensure_ascii = False, indent = 2)

@@ -1,10 +1,20 @@
 import { AppError } from '../utils/error.js';
 
 export function errorMiddleware(err, _req, res, _next) {
-  const status = err instanceof AppError ? err.status : 500;
-  const message = err?.message || 'Internal Server Error';
+  // body-parser / express.json JSON parse errors
+  const isJsonParseError =
+    err?.type === 'entity.parse.failed' ||
+    (err instanceof SyntaxError && 'body' in err);
 
-  // Keep response JSON simple for frontend.
+  const status =
+    err instanceof AppError ? err.status :
+    isJsonParseError ? 400 :
+    500;
+
+  const message =
+    isJsonParseError ? 'Invalid JSON body (use double quotes, e.g. {"query":"..."} )' :
+    err?.message || 'Internal Server Error';
+
   res.status(status).json({
     code: status,
     error: message
