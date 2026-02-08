@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 from zhipuai import ZhipuAI
 
 react_prompt = """
@@ -16,6 +17,7 @@ react_prompt = """
 - 必须包含 Thought 和 Action 两个部分。
 - Action 必须是合法的 JSON 代码块。严禁包含任何 Markdown 标记（如 ```json）、严禁包含任何前缀文字（如‘这是结果’）或后缀说明。你的整个输出必须能直接被 json.loads() 解析。
 - 语言简洁，去除废话。
+- 除专有名词/机构名/人名外，输出必须为中文。不要输出英文句子或段落。
 
 {format_instruction}
 """
@@ -32,6 +34,7 @@ agent_prompt = {
                 提取明确的时间节点。
                 去除重复信息，保留出现重复信息的条目中信息量最大的一条
                 按时间顺序排列；若无时间信息，则按照逻辑顺序排列（同时将date标记为“背景信息”）。
+                标题与摘要必须为中文表达（必要时可改写或翻译）。来源名称可保留原文媒体名。
                 """,
         "format": """Action 格式:
         {
@@ -39,7 +42,7 @@ agent_prompt = {
                 {
                     "date": "YYYY-MM-DD", 
                     "title": "事件简要标题",
-                    "snippet": "输入文本中已经给出的新闻摘要（原样输出即可）",
+                    "snippet": "对新闻摘要进行中文概述（不要直接复制英文原文）",
                     "sourceName": "发布媒体/机构名称",
                     "url": "关联的原文链接或跳转链接（如输入文本中已给出）",
                     "tags": ["概括的新闻主体类型（如监管机构、企业官方等）“]
@@ -50,12 +53,12 @@ agent_prompt = {
     },
     "B": {
         "name": "立场分析",
-        "goal": "识别新闻中的关键实体（公司、协会、政府、群众等等），概括其核心立场和利益诉求。",
+        "goal": "识别新闻中的关键实体（公司、协会、政府、群众等等），概括其核心立场和利益诉求。输出必须为中文。",
         "format": "Action 格式: {\"stakeholders\": [{\"party\": \"...\", \"stance\": \"...\", \"viewpoint\": \"...\"}]}"
     },
     "C": {
         "name": "关联推荐",
-        "goal": "基于当前事件，分析事件本质，横向联想 1-2 个历史上相似或逻辑相关的事件。",
+        "goal": "基于当前事件，分析事件本质，横向联想 1-2 个历史上相似或逻辑相关的事件。输出必须为中文。",
         "format": "Action 格式: {\"associations\": [{\"eventName\": \"...\", \"reason\": \"...\"}]}"
     }
 }
@@ -65,6 +68,7 @@ class ReActTrinityAnalyzer:
     def __init__(self, api_key: str):
         self.client = ZhipuAI(api_key=api_key)
         self.model = "glm-4-flash"
+        self.debug = os.getenv("AGENT_DEBUG", "").strip() == "1"
 
     def _max_chars_for_step(self, agent_key: str) -> int:
         """Return max input chars for a given ReAct step.
@@ -82,15 +86,15 @@ class ReActTrinityAnalyzer:
             except Exception:
                 return fallback
 
-        default_max = _to_int(os.getenv("AGENT_MAX_CHARS_DEFAULT", "5000"), 5000)
+        default_max = _to_int(os.getenv("AGENT_MAX_CHARS_DEFAULT", "2500"), 2500)
 
         if agent_key == "B":
-            return _to_int(os.getenv("AGENT_MAX_CHARS_STANCES", str(default_max)), default_max)
+            return _to_int(os.getenv("AGENT_MAX_CHARS_STANCES", "2000"), 2000)
 
         if agent_key == "C":
             return _to_int(
-                os.getenv("AGENT_MAX_CHARS_RELATED_EVENTS", str(default_max)),
-                default_max
+                os.getenv("AGENT_MAX_CHARS_RELATED_EVENTS", "2000"),
+                2000
             )
 
         return default_max
@@ -99,7 +103,18 @@ class ReActTrinityAnalyzer:
             match = re.search(r'(\{.*\})', text, re.DOTALL)
             if match:
                 json_str = match.group(1).strip()
-                return json.loads(json_str)
+                data = json.loads(json_str)
+                # Some model outputs wrap payload inside Action.
+                if isinstance(data, dict):
+                    if isinstance(data.get("Action"), dict):
+                        return data["Action"]
+                    if isinstance(data.get("action"), dict):
+                        return data["action"]
+                    if isinstance(data.get("data"), dict):
+                        nested = data["data"].get("Action") or data["data"].get("action")
+                        if isinstance(nested, dict):
+                            return nested
+                return data
             return {
                 "code": 500, 
                 "msg": "未在模型输出中找到有效的 Action JSON 结构",
@@ -132,8 +147,11 @@ class ReActTrinityAnalyzer:
         )
         
         raw_output = response.choices[0].message.content
-        #print(f"\n--- {config['name']} ReAct 思考过程 ---")
-        #print(raw_output)
+        if self.debug:
+            sys.stderr.write(f"\n[agent][{config['name']}] RAW OUTPUT START\n")
+            sys.stderr.write(raw_output)
+            sys.stderr.write(f"\n[agent][{config['name']}] RAW OUTPUT END\n")
+            sys.stderr.flush()
         return self.extract_json(raw_output)
 
     def run(self, raw_text: str):

@@ -1,14 +1,31 @@
 import axios from 'axios';
 
-const API_BASE = 'http://localhost:3000'; // 根据你的后端地址修改
+// 仅使用浏览器可用的环境变量，避免 content-script 中的 process 未定义报错。
+const API_BASE =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE) ||
+  'http://localhost:8787';
 
-export const analyzeText = async (query: string, currentUrl: string) => {
+export const analyzeText = async (
+  query: string,
+  currentUrl: string,
+  agentUrl?: string,
+  snippets?: any[],
+  region?: string,
+  agentKey?: string
+) => {
   try {
     const response = await axios.post(`${API_BASE}/api/analyze`, {
       query,
       context: {
         currentUrl,
         timestamp: new Date().toISOString()
+      },
+      region,
+      snippets: snippets || []
+    }, {
+      headers: {
+        ...(agentUrl ? { 'x-agent-url': agentUrl } : {}),
+        ...(agentKey ? { 'x-agent-key': agentKey } : {})
       }
     });
 
@@ -77,4 +94,44 @@ export const mockAnalyzeText = async (): Promise<any> => {
       }
     ]
   };
+};
+
+export const searchNews = async (query: string, region?: string) => {
+  const response = await axios.post(`${API_BASE}/api/search`, {
+    query,
+    region
+  });
+  return response.data;
+};
+
+export const validateDdgService = async (region?: string) => {
+  try {
+    const response = await axios.post(`${API_BASE}/api/validate/ddg`, { region });
+    return response.data;
+  } catch (error: any) {
+    return {
+      ok: false,
+      message:
+        error?.response?.data?.message ||
+        error?.message ||
+        'DDG 服务不可用'
+    };
+  }
+};
+
+export const validateAgentKey = async (apiKey: string) => {
+  try {
+    const response = await axios.post(`${API_BASE}/api/validate/agent`, {
+      apiKey
+    });
+    return response.data;
+  } catch (error: any) {
+    return {
+      ok: false,
+      message:
+        error?.response?.data?.message ||
+        error?.message ||
+        'Agent Key 校验失败'
+    };
+  }
 };

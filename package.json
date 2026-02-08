@@ -1,0 +1,25 @@
+{
+  "name": "bubblepop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:ext\"",
+    "dev:server": "SEARCH_PYTHON=../.venv/bin/python npm --prefix news-plugin-backend run dev",
+    "dev:ext": "wxt .",
+    "build:ext": "wxt build .",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/ensure-python-deps.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
+    "typescript": "^5.4.5",
+    "wxt": "^0.20.13"
+  }
+}

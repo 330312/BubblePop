@@ -51,6 +51,17 @@ function stancesFromTimeline(timeline) {
   }));
 }
 
+function containsCjk(text = '') {
+  return /[\u4e00-\u9fff]/.test(text);
+}
+
+function ensureChinese(text = '', fallbackLabel = '') {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  if (containsCjk(s)) return s;
+  return fallbackLabel ? `${fallbackLabel}（未翻译）` : '英文内容（未翻译）';
+}
+
 /**
  * A simple, non-LLM fallback so frontend can联调.
  * When AGENT_URL is configured, this will be replaced by the python agent output.
@@ -60,8 +71,8 @@ export function buildFallbackAnalysis({ query, snippets }) {
     const date = toISODate(r.datePublished) || '背景信息';
     return {
       date,
-      title: r.title,
-      snippet: r.snippet,
+      title: ensureChinese(r.title, '英文标题'),
+      snippet: ensureChinese(r.snippet, '英文摘要'),
       sourceName: r.sourceName || '',
       url: r.url,
       tags: inferTags(r.snippet, r.title),
@@ -69,20 +80,21 @@ export function buildFallbackAnalysis({ query, snippets }) {
     };
   });
 
-  // Sort: background last, then by date
+  // Sort: background first, then by date
   timeline.sort((a, b) => {
     const aBg = a.date === '背景信息';
     const bBg = b.date === '背景信息';
-    if (aBg && !bBg) return 1;
-    if (!aBg && bBg) return -1;
+    if (aBg && !bBg) return -1;
+    if (!aBg && bBg) return 1;
     if (aBg && bBg) return 0;
     return a.date.localeCompare(b.date);
   });
 
   return {
-    summary: `围绕“${query}”的新闻摘要梳理（基于 Bing 搜索结果，非最终模型分析）。`,
+    summary: `围绕“${query}”的新闻摘要梳理（基于 DuckDuckGo 搜索结果，非最终模型分析）。`,
     timeline: timeline.slice(0, 20),
     stances: stancesFromTimeline(timeline),
-    relatedEvents: []
+    relatedEvents: [],
+    sources: snippets || []
   };
 }

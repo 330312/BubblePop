@@ -19,11 +19,25 @@ export interface RelatedEvent {
   reason: string;
 }
 
+export interface SearchResult {
+  title: string;
+  snippet: string;
+  url: string;
+  sourceName?: string;
+  datePublished?: string;
+}
+
 export interface AnalysisResult {
   summary: string;
   timeline: TimelineEvent[];
   stances: Stance[];
   relatedEvents: RelatedEvent[];
+  sources?: SearchResult[];
+  meta?: {
+    ddg?: { ok: boolean; message?: string };
+    agent?: { ok: boolean; message?: string; used?: boolean };
+    mode?: 'analysis' | 'news';
+  };
 }
 
 export interface AnalysisRequest {

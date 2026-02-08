@@ -11,6 +11,8 @@ import { notFoundMiddleware } from './middleware/notFound.js';
 import { healthRouter } from './routes/health.js';
 import { searchRouter } from './routes/search.js';
 import { analyzeRouter } from './routes/analyze.js';
+import { validateRouter } from './routes/validate.js';
+import { newsRouter } from './routes/news.js';
 
 export function createApp() {
   dotenv.config();
@@ -52,6 +54,8 @@ export function createApp() {
   app.use('/health', healthRouter);
   app.use('/api/search', searchRouter);
   app.use('/api/analyze', analyzeRouter);
+  app.use('/api/news', newsRouter);
+  app.use('/api/validate', validateRouter);
 
   // 404 + error
   app.use(notFoundMiddleware);

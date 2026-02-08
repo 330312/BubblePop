@@ -1,7 +1,14 @@
 import os
 from zhipuai import ZhipuAI
 
-api_key = "5bba23796f0348a786c72b16c4639579.m6qMYAQNwicVwKkc"
+api_key = (
+    os.environ.get("ZAI_API_KEY")
+    or os.environ.get("ZHIPU_API_KEY")
+    or os.environ.get("GLM_API_KEY")
+)
+if not api_key:
+    raise RuntimeError("Missing API key in env (ZAI_API_KEY / ZHIPU_API_KEY / GLM_API_KEY)")
+
 client = ZhipuAI(api_key=api_key)
 
 try:

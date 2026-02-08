@@ -49,8 +49,8 @@ export function isAgentConfigured() {
   return false;
 }
 
-async function agentAnalyzeHttp({ query, context, snippets }) {
-  const url = process.env.AGENT_URL;
+async function agentAnalyzeHttp({ query, context, snippets, agentUrl }) {
+  const url = agentUrl || process.env.AGENT_URL;
   if (!url) {
     throw new AppError(500, 'AGENT_URL not configured');
   }
@@ -90,18 +90,40 @@ async function agentAnalyzeHttp({ query, context, snippets }) {
   throw new AppError(502, 'Agent response format not recognized');
 }
 
-async function agentAnalyzeProcess({ rawText }) {
-  const pythonCmd = process.env.AGENT_PYTHON || process.env.PYTHON || 'python';
+function resolvePythonCmd() {
+  const venvPythonLocal = path.resolve(process.cwd(), '.venv/bin/python');
+  const venvPythonRepo = path.resolve(process.cwd(), '..', '.venv/bin/python');
+  return (
+    process.env.AGENT_PYTHON ||
+    process.env.SEARCH_PYTHON ||
+    process.env.PYTHON ||
+    (fs.existsSync(venvPythonLocal)
+      ? venvPythonLocal
+      : fs.existsSync(venvPythonRepo)
+        ? venvPythonRepo
+        : 'python3')
+  );
+}
+
+async function agentAnalyzeProcess({ rawText, apiKey, timeoutMs, validateOnly }) {
+  const pythonCmd = resolvePythonCmd();
   const runner = path.resolve(process.cwd(), process.env.AGENT_RUNNER || 'python/agent_runner.py');
-  const timeout = Number(process.env.AGENT_TIMEOUT_MS || 45000);
+  const timeout = Number(timeoutMs || process.env.AGENT_TIMEOUT_MS || 90000);
 
   if (!fs.existsSync(runner)) {
     throw new AppError(500, `Agent runner not found: ${runner}`);
   }
 
   return await new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    if (apiKey) {
+      env.ZAI_API_KEY = apiKey;
+      env.ZHIPU_API_KEY = apiKey;
+      env.GLM_API_KEY = apiKey;
+    }
+
     const child = spawn(pythonCmd, [runner], {
-      env: process.env,
+      env,
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -128,6 +150,9 @@ async function agentAnalyzeProcess({ rawText }) {
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (stderr.trim()) {
+        console.info(`[agent] ${stderr.trim()}`);
+      }
       if (code !== 0 && !stdout.trim()) {
         reject(new AppError(502, `Agent process exited with code ${code}: ${stderr.trim()}`));
         return;
@@ -162,7 +187,7 @@ async function agentAnalyzeProcess({ rawText }) {
       reject(new AppError(502, 'Agent response format not recognized'));
     });
 
-    child.stdin.write(JSON.stringify({ rawText }));
+    child.stdin.write(JSON.stringify({ rawText, validateOnly: Boolean(validateOnly) }));
     child.stdin.end();
   });
 }
@@ -172,8 +197,12 @@ async function agentAnalyzeProcess({ rawText }) {
  * - mode=http: POST to AGENT_URL
  * - mode=process: spawn python runner (python/agent_runner.py) which imports python/Agent.py
  */
-export async function agentAnalyze({ query, context, snippets, rawText }) {
+export async function agentAnalyze({ query, context, snippets, rawText, agentUrl, apiKey }) {
   const mode = getAgentMode();
+
+  if (agentUrl) {
+    return agentAnalyzeHttp({ query, context, snippets, agentUrl });
+  }
 
   if (mode === 'http') {
     return agentAnalyzeHttp({ query, context, snippets });
@@ -183,8 +212,141 @@ export async function agentAnalyze({ query, context, snippets, rawText }) {
     if (!rawText) {
       throw new AppError(500, 'rawText is required for process mode');
     }
-    return agentAnalyzeProcess({ rawText });
+    return agentAnalyzeProcess({ rawText, apiKey });
   }
 
   throw new AppError(500, 'Agent not configured');
+}
+
+export async function validateAgentKey(apiKey) {
+  if (!apiKey) throw new AppError(400, 'Missing API key');
+  // Lightweight validation path in agent_runner.py
+  return agentAnalyzeProcess({
+    rawText: '',
+    apiKey,
+    timeoutMs: 15000,
+    validateOnly: true
+  });
+}
+
+async function agentRunTask({ payload, apiKey, timeoutMs }) {
+  const pythonCmd = resolvePythonCmd();
+  const runner = path.resolve(process.cwd(), process.env.AGENT_RUNNER || 'python/agent_runner.py');
+  const timeout = Number(timeoutMs || process.env.AGENT_TIMEOUT_MS || 45000);
+
+  if (!fs.existsSync(runner)) {
+    throw new AppError(500, `Agent runner not found: ${runner}`);
+  }
+
+  return await new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    if (apiKey) {
+      env.ZAI_API_KEY = apiKey;
+      env.ZHIPU_API_KEY = apiKey;
+      env.GLM_API_KEY = apiKey;
+    }
+
+    const child = spawn(pythonCmd, [runner], {
+      env,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new AppError(504, 'Agent process timeout'));
+    }, timeout);
+
+    child.stdout.on('data', (d) => {
+      stdout += d.toString('utf8');
+    });
+
+    child.stderr.on('data', (d) => {
+      stderr += d.toString('utf8');
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(new AppError(502, `Agent process spawn failed: ${err?.message || 'unknown error'}`));
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (stderr.trim()) {
+        console.info(`[agent] ${stderr.trim()}`);
+      }
+      if (code !== 0 && !stdout.trim()) {
+        reject(new AppError(502, `Agent process exited with code ${code}: ${stderr.trim()}`));
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        reject(new AppError(502, `Failed to parse agent output. stderr=${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+
+      if (typeof parsed?.code === 'number' && parsed.code !== 200) {
+        reject(new AppError(502, `Agent returned error code ${parsed.code}: ${parsed.msg || 'unknown'}`));
+        return;
+      }
+
+      resolve(parsed?.data ?? parsed);
+    });
+
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  });
+}
+
+export async function agentStrategy({ selection, pageTitle, pageUrl, maxQueries, apiKey }) {
+  return agentRunTask({
+    payload: {
+      mode: 'strategy',
+      selection,
+      pageTitle,
+      pageUrl,
+      maxQueries
+    },
+    apiKey,
+    timeoutMs: 20000
+  });
+}
+
+export async function agentSelect({ candidates, maxOutput, apiKey }) {
+  return agentRunTask({
+    payload: {
+      mode: 'select',
+      candidates,
+      maxOutput
+    },
+    apiKey,
+    timeoutMs: 20000
+  });
+}
+
+export async function agentSummarize({ items, apiKey }) {
+  return agentRunTask({
+    payload: {
+      mode: 'summarize',
+      items
+    },
+    apiKey,
+    timeoutMs: 25000
+  });
+}
+
+export async function agentFilter({ candidates, apiKey }) {
+  return agentRunTask({
+    payload: {
+      mode: 'filter',
+      candidates
+    },
+    apiKey,
+    timeoutMs: 20000
+  });
 }

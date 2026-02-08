@@ -1,125 +1,91 @@
-# News Plugin Backend (Express)
+# BubblePop Backend (Express)
 
-This is a minimal Express backend for the pipeline:
+后端负责：
+- 聚合搜索（DDG + GDELT）
+- 候选去重排序
+- 调用 Agent（可选）或 fallback
+- 输出结构化 JSON
 
-> 划词 query -> 博查搜索 ->（可选）调用成员 D 的 Agent.py -> 返回结构化 JSON
+---
 
-It implements two APIs:
-- `POST /api/analyze` (PRD main API)
-- `POST /api/search` (debug / agent helper)
-
-## 1) Quick start
+## 启动
 
 ```bash
 cd news-plugin-backend
 cp .env.example .env
-# fill BOCHA_API_KEY
+# 填写本地环境变量
 
 npm i
 npm run dev
 ```
 
-Server defaults to `http://localhost:8787`.
+默认监听 `http://localhost:8787`。
 
-## 2) Environment variables
+---
 
-Key settings (see `.env.example` for full list):
+## 环境变量
+详见 `.env.example`。常用项：
 
-- `BOCHA_API_KEY` (required): your Bocha Search API key (get from https://open.bochaai.com/)
-- `CORS_ORIGINS`: `*` for dev or comma-separated origins
+### 搜索
+- `DDG_REGION`：`cn-zh` / `hk-tzh` / `tw-tzh` / `us-en` / `uk-en` / `wt-wt`
+- `DDG_BACKEND`：`auto`
+- `DDG_TIMEOUT_MS`
+- `GDELT_TIMEOUT_MS`
+- `GDELT_INSECURE`：TLS 被拦截时设为 `1`
+- `SEARCH_PYTHON`：Python 路径
 
-### Agent integration (optional)
+### Agent
+- `AGENT_MODE=process`（推荐）
+- `AGENT_RUNNER=python/agent_runner.py`
+- `AGENT_TIMEOUT_MS`
+- `AGENT_DEBUG=1`：输出智能体原始输出到日志
+- `ZAI_API_KEY` / `ZHIPU_API_KEY` / `GLM_API_KEY`：任选其一
 
-Choose one:
+---
 
-#### Option A: **process mode** (recommended if you have Agent.py as a local file)
+## 接口
 
-- Set:
-  - `AGENT_MODE=process`
-  - `ZAI_API_KEY=...` (or `ZHIPU_API_KEY` / `GLM_API_KEY`)
-  - `AGENT_PYTHON=python` (Windows) or `python3` (macOS/Linux)
+### `GET /health`
 
-Then install python deps for member D's code:
-
-```bash
-pip install zai
-# plus any other deps your Agent.py needs
-```
-
-This repo already ships:
-- `python/Agent.py` (member D code)
-- `python/agent_runner.py` (CLI wrapper: reads stdin JSON, prints analyzer.run(rawText) result)
-
-The backend will spawn:
-
-```bash
-python python/agent_runner.py
-```
-
-and parse its stdout JSON.
-
-#### Option B: **http mode** (if you wrap agent as a web service)
-
-- Set:
-  - `AGENT_MODE=http`
-  - `AGENT_URL=http://127.0.0.1:8001/agent` (example)
-
-In this mode, backend POSTs `{ query, context, snippets }` to `AGENT_URL`.
-
-## 3) Endpoints
-
-### Health
-
-- `GET /health`
-
-### Search (debug / agent helper)
-
-- `POST /api/search`
-- Body:
-
+### `POST /api/search`
 ```json
-{ "query": "某品牌咖啡涨价", "count": 20, "market": "zh-CN" }
+{ "query": "某品牌咖啡涨价", "count": 20, "region": "cn-zh" }
 ```
 
-- Response:
-
+### `POST /api/analyze`
 ```json
 {
-  "code": 200,
-  "data": {
-    "query": "...",
-    "results": [
-      {
-        "title": "...",
-        "snippet": "...",
-        "url": "...",
-        "sourceName": "...",
-        "datePublished": "..."
-      }
-    ]
-  }
+  "query": "某品牌咖啡涨价",
+  "region": "cn-zh",
+  "context": {"currentUrl":"https://example.com"}
 }
 ```
 
-### Analyze (frontend main API)
+---
 
-- `POST /api/analyze`
-- Matches the PRD response shape.
-
-Behavior:
-- If agent is configured (`AGENT_MODE=http` + `AGENT_URL`, or `AGENT_MODE=process` + `ZAI_API_KEY`), it will call agent and return its structured result.
-- Otherwise, it returns a simple heuristic fallback (to unblock frontend联调).
-
-## 4) Curl examples
+## 测试命令
 
 ```bash
 curl -s http://localhost:8787/health
 
-curl -s http://localhost:8787/api/search \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"某品牌咖啡涨价"}'
+curl -s -X POST http://localhost:8787/api/search \
+  -H 'content-type: application/json' \
+  -d '{"query":"王楚钦亚洲杯复出首战速胜","region":"cn-zh"}'
 
-curl -s http://localhost:8787/api/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"某品牌咖啡涨价","context":{"currentUrl":"https://example.com","timestamp":"2026-01-29T10:00:00Z"}}'
+curl -s -X POST http://localhost:8787/api/analyze \
+  -H 'content-type: application/json' \
+  -H 'x-agent-key: <YOUR_GLM_KEY>' \
+  -d '{"query":"王楚钦亚洲杯复出首战速胜","region":"cn-zh","context":{"currentUrl":"https://example.com"}}'
 ```
+
+调试模式（可选）：  
+```bash
+GDELT_INSECURE=1 AGENT_DEBUG=1 npm run dev
+```
+
+---
+
+## 常见问题
+- **DDG 无结果**：检查 Python 依赖与 `SEARCH_PYTHON`
+- **GDELT TLS 错误**：设置 `GDELT_INSECURE=1`
+- **Agent 超时**：增大 `AGENT_TIMEOUT_MS` 或减少输入文本

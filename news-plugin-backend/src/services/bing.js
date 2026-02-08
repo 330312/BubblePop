@@ -70,8 +70,8 @@ async function fetchBocha({ endpoint, query, count, freshness, key }) {
  * Search via Bocha Web Search API.
  * Returns cleaned, deduped results.
  */
-export async function bochaSearch({ query, count = 20, freshness = 'noLimit' }) {
-  const key = process.env.BOCHA_API_KEY;
+export async function bochaSearch({ query, count = 20, freshness = 'noLimit', apiKey }) {
+  const key = apiKey || process.env.BOCHA_API_KEY;
   if (!key) {
     throw new Error('Missing BOCHA_API_KEY in environment');
   }
