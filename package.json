@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:ext\"",
-    "dev:server": "SEARCH_PYTHON=../.venv/bin/python npm --prefix news-plugin-backend run dev",
+    "dev:server": "npm --prefix news-plugin-backend run dev",
     "dev:ext": "wxt .",
     "build:ext": "wxt build .",
     "typecheck": "tsc --noEmit",

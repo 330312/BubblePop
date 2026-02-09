@@ -4,3 +4,7 @@ node_modules
 .output
 .wxt
 .venv
+__pycache__/
+*.pyc
+*.log
+.DS_Store
