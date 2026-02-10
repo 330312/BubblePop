@@ -176,19 +176,26 @@ Python 依赖：
 
 ### 1) 安装 Python 依赖
 
-确保系统已安装 Python >= 3.9，然后安装项目所需的包（国内建议使用清华镜像）：
+确保系统已安装 Python >= 3.9，然后安装后端 Python 脚本所需的包（国内建议使用清华镜像）：
 
 ```bash
 pip install ddgs zhipuai -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
+- `ddgs` -- 被 `news-plugin-backend/python/ddg_search.py` 使用，提供 DuckDuckGo 搜索能力
+- `zhipuai` -- 被 `news-plugin-backend/python/Agent.py` 和 `agent_runner.py` 使用，调用智谱 GLM 大模型
+
+> 这些包安装在系统 Python 环境中即可，后端通过 `spawn` 调用 Python 解释器执行脚本。
+
 ### 2) 安装 Node.js 依赖
 
+项目有两个独立的 `package.json`，需要分别安装：
+
 ```bash
-# 项目根目录
+# 项目根目录（前端浏览器扩展：React / WXT 等）
 npm install
 
-# 后端目录
+# 后端目录（Express / Axios / Zod 等）
 cd news-plugin-backend
 npm install
 cd ..
@@ -204,7 +211,7 @@ copy .env.example .env
 编辑 `.env`，填写以下关键项：
 
 ```ini
-# Python 解释器路径（conda 环境激活后可直接写 python）
+# Python 解释器路径（直接写 python 或完整路径）
 SEARCH_PYTHON=python
 
 # 智谱 AI API Key（必填，否则智能体分析不可用）
